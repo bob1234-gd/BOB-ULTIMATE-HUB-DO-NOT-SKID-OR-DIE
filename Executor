@@ -1,0 +1,933 @@
+-- =============================================================================
+-- SYSTEM SERVICES & DEPENDENCIES
+-- =============================================================================
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+
+-- Clean up any existing instances of the executor running
+local existingUI = CoreGui:FindFirstChild("BobUltimateExecutor")
+if existingUI then existingUI:Destroy() end
+
+-- Theme State Management
+local currentThemeColor = Color3.fromRGB(88, 101, 242) -- Default Discord Blurple
+local activeTabButton = nil
+local registeredElements = {} 
+local rainbowConnection = nil 
+
+-- Data Persistence Settings
+local FILE_NAME = "BobUltimateExecutor_SavedScripts.json"
+
+-- Permanent Community Defaults (Locked from deletion)
+local defaultScripts = {
+    {Name = "Infinite Yield (Admin)", Source = "loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()"},
+    {Name = "Dex Explorer (V4)", Source = "loadstring(game:HttpGet('https://raw.githubusercontent.com/infyiff/backup/main/dex.lua'))()"}
+}
+
+-- User Modifiable Script Database
+local savedScripts = {}
+
+-- Safe Local Database Handlers
+local function loadScriptsData()
+    if isfile and readfile and isfile(FILE_NAME) then
+        local success, decoded = pcall(function()
+            return HttpService:JSONDecode(readfile(FILE_NAME))
+        end)
+        if success and type(decoded) == "table" then
+            savedScripts = decoded
+        end
+    end
+end
+
+local function saveScriptsData()
+    if writefile and HttpService then
+        pcall(function()
+            writefile(FILE_NAME, HttpService:JSONEncode(savedScripts))
+        end)
+    end
+end
+
+-- Initialize the database load
+loadScriptsData()
+
+-- =============================================================================
+-- CORE WINDOW & DRAGGING SETUP
+-- =============================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "BobUltimateExecutor"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = CoreGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 560, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -280, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(32, 34, 37)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Top Title Bar
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBarAccent"
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+TopBar.BackgroundColor3 = currentThemeColor
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+table.insert(registeredElements, TopBar)
+
+local TopCorner = Instance.new("UICorner")
+TopCorner.CornerRadius = UDim.new(0, 8)
+TopCorner.Parent = TopBar
+
+local FlushBar = Instance.new("Frame")
+FlushBar.Name = "TopBarAccent"
+FlushBar.Size = UDim2.new(1, 0, 0, 10)
+FlushBar.Position = UDim2.new(0, 0, 1, -10)
+FlushBar.BackgroundColor3 = currentThemeColor
+FlushBar.BorderSizePixel = 0
+FlushBar.Parent = TopBar
+table.insert(registeredElements, FlushBar)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -40, 1, 0)
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "Bobiscoolyip Ultimate Executor"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 15
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TopBar
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize = 16
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Parent = TopBar
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+-- Sidebar Navigation
+local Sidebar = Instance.new("ScrollingFrame")
+Sidebar.Name = "Sidebar"
+Sidebar.Size = UDim2.new(0, 140, 1, -40)
+Sidebar.Position = UDim2.new(0, 0, 0, 40)
+Sidebar.BackgroundColor3 = Color3.fromRGB(43, 45, 49)
+Sidebar.BorderSizePixel = 0
+Sidebar.ScrollBarThickness = 2
+Sidebar.CanvasSize = UDim2.new(0, 0, 0, 0)
+Sidebar.Parent = MainFrame
+
+local SidebarLayout = Instance.new("UIListLayout")
+SidebarLayout.Padding = UDim.new(0, 4)
+SidebarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+SidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SidebarLayout.Parent = Sidebar
+
+local ContainerPadding = Instance.new("UIPadding")
+ContainerPadding.PaddingTop = UDim.new(0, 8)
+ContainerPadding.Parent = Sidebar
+
+-- Content Display Window
+local ContentArea = Instance.new("Frame")
+ContentArea.Name = "ContentArea"
+ContentArea.Size = UDim2.new(1, -140, 1, -40)
+ContentArea.Position = UDim2.new(0, 140, 0, 40)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainFrame
+
+-- =============================================================================
+-- THEME ENGINE LOGIC
+-- =============================================================================
+local function updateTheme(newColor)
+    currentThemeColor = newColor
+    for _, element in ipairs(registeredElements) do
+        if element.Parent and (element.Name == "TopBarAccent" or element.Name == "AccentLine") then
+            element.BackgroundColor3 = newColor
+        elseif element:IsA("TextLabel") and element.Name == "TabButtonText" and element.Parent.Name == "ActiveTab" then
+            element.TextColor3 = newColor
+        end
+    end
+end
+
+local function stopRainbow()
+    if rainbowConnection then
+        rainbowConnection:Disconnect()
+        rainbowConnection = nil
+    end
+end
+
+local function startRainbow()
+    stopRainbow()
+    rainbowConnection = RunService.RenderStepped:Connect(function()
+        local hue = (tick() % 4) / 4
+        local color = Color3.fromHSV(hue, 1, 1)
+        updateTheme(color)
+    end)
+end
+
+ScreenGui.Destroying:Connect(stopRainbow)
+
+-- Keyboard Toggle Bind (Right Control)
+local isVisible = true
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightControl then
+        isVisible = not isVisible
+        MainFrame.Visible = isVisible
+    end
+end)
+
+-- =============================================================================
+-- INTERFACE CORE BUILDER
+-- =============================================================================
+local tabs = {}
+
+local function createTab(name)
+    local TabContainer = Instance.new("ScrollingFrame")
+    TabContainer.Size = UDim2.new(1, 0, 1, 0)
+    TabContainer.BackgroundTransparency = 1
+    TabContainer.Visible = false
+    TabContainer.ScrollBarThickness = 4
+    TabContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+    TabContainer.Parent = ContentArea
+    
+    local TabPadding = Instance.new("UIPadding")
+    TabPadding.PaddingTop = UDim.new(0, 10)
+    TabPadding.PaddingLeft = UDim.new(0, 15)
+    TabPadding.PaddingRight = UDim.new(0, 15)
+    TabPadding.Parent = TabContainer
+
+    local TabLayout = Instance.new("UIListLayout")
+    TabLayout.Padding = UDim.new(0, 6)
+    TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    TabLayout.Parent = TabContainer
+    
+    TabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        TabContainer.CanvasSize = UDim2.new(0, 0, 0, TabLayout.AbsoluteContentSize.Y + 20)
+    end)
+
+    local TabButton = Instance.new("TextButton")
+    TabButton.Size = UDim2.new(0, 125, 0, 32)
+    TabButton.BackgroundColor3 = Color3.fromRGB(50, 53, 59)
+    TabButton.Text = ""
+    TabButton.AutoButtonColor = false
+    TabButton.Parent = Sidebar
+    
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(0, 4)
+    ButtonCorner.Parent = TabButton
+    
+    local TabText = Instance.new("TextLabel")
+    TabText.Name = "TabButtonText"
+    TabText.Size = UDim2.new(1, 0, 1, 0)
+    TabText.BackgroundTransparency = 1
+    TabText.Text = name
+    TabText.TextColor3 = Color3.fromRGB(185, 187, 190)
+    TabText.Font = Enum.Font.GothamBold
+    TabText.TextSize = 12
+    TabText.Parent = TabButton
+    table.insert(registeredElements, TabText)
+
+    TabButton.MouseButton1Click:Connect(function()
+        for _, t in pairs(tabs) do
+            t.Container.Visible = false
+            t.Button.Name = "InactiveTab"
+            t.Text.TextColor3 = Color3.fromRGB(185, 187, 190)
+        end
+        TabContainer.Visible = true
+        TabButton.Name = "ActiveTab"
+        TabText.TextColor3 = currentThemeColor
+    end)
+
+    tabs[name] = {Container = TabContainer, Button = TabButton, Text = TabText}
+    
+    if not activeTabButton then
+        activeTabButton = TabButton
+        TabContainer.Visible = true
+        TabButton.Name = "ActiveTab"
+        TabText.TextColor3 = currentThemeColor
+    end
+
+    Sidebar.CanvasSize = UDim2.new(0, 0, 0, SidebarLayout.AbsoluteContentSize.Y + 20)
+
+    return {
+        AddSectionHeader = function(titleText, layoutOrder)
+            local HeaderLabel = Instance.new("TextLabel")
+            HeaderLabel.Size = UDim2.new(1, 0, 0, 25)
+            HeaderLabel.BackgroundTransparency = 1
+            HeaderLabel.Text = "--- " .. string.upper(titleText) .. " ---"
+            HeaderLabel.TextColor3 = Color3.fromRGB(114, 118, 125)
+            HeaderLabel.Font = Enum.Font.GothamBold
+            HeaderLabel.TextSize = 11
+            HeaderLabel.TextXAlignment = Enum.TextXAlignment.Center
+            HeaderLabel.LayoutOrder = layoutOrder or 0
+            HeaderLabel.Parent = TabContainer
+        end,
+        AddButton = function(text, callback, layoutOrder)
+            local ButtonFrame = Instance.new("Frame")
+            ButtonFrame.Size = UDim2.new(1, 0, 0, 36)
+            ButtonFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+            ButtonFrame.LayoutOrder = layoutOrder or 0
+            ButtonFrame.Parent = TabContainer
+            
+            local BFCorner = Instance.new("UICorner")
+            BFCorner.CornerRadius = UDim.new(0, 4)
+            BFCorner.Parent = ButtonFrame
+            
+            local Line = Instance.new("Frame")
+            Line.Name = "AccentLine"
+            Line.Size = UDim2.new(0, 4, 1, 0)
+            Line.BackgroundColor3 = currentThemeColor
+            Line.BorderSizePixel = 0
+            Line.Parent = ButtonFrame
+            table.insert(registeredElements, Line)
+            
+            local LineCorner = Instance.new("UICorner")
+            LineCorner.CornerRadius = UDim.new(0, 4)
+            LineCorner.Parent = Line
+
+            local ActBtn = Instance.new("TextButton")
+            ActBtn.Size = UDim2.new(1, -14, 1, 0)
+            ActBtn.Position = UDim2.new(0, 10, 0, 0)
+            ActBtn.BackgroundTransparency = 1
+            ActBtn.Text = text
+            ActBtn.TextColor3 = Color3.fromRGB(220, 221, 222)
+            ActBtn.Font = Enum.Font.GothamMedium
+            ActBtn.TextSize = 12
+            ActBtn.TextXAlignment = Enum.TextXAlignment.Left
+            ActBtn.Parent = ButtonFrame
+            
+            ActBtn.MouseButton1Click:Connect(callback)
+        end
+    }
+end
+
+local function ShowNotification(title, message)
+    local NotifFrame = Instance.new("Frame")
+    NotifFrame.Size = UDim2.new(0, 220, 0, 65)
+    NotifFrame.Position = UDim2.new(1, 30, 1, -80)
+    NotifFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+    NotifFrame.Parent = ScreenGui
+    
+    local NFCorner = Instance.new("UICorner")
+    NFCorner.CornerRadius = UDim.new(0, 6)
+    NFCorner.Parent = NotifFrame
+    
+    local NFBorder = Instance.new("Frame")
+    NFBorder.Name = "AccentLine"
+    NFBorder.Size = UDim2.new(0, 4, 1, 0)
+    NFBorder.BackgroundColor3 = currentThemeColor
+    NFBorder.Parent = NotifFrame
+    table.insert(registeredElements, NFBorder)
+    
+    local NFBCC = Instance.new("UICorner")
+    NFBCC.CornerRadius = UDim.new(0, 6)
+    NFBCC.Parent = NFBorder
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -20, 0, 25)
+    TitleLabel.Position = UDim2.new(0, 12, 0, 4)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = title
+    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextSize = 13
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.Parent = NotifFrame
+
+    local MsgLabel = Instance.new("TextLabel")
+    MsgLabel.Size = UDim2.new(1, -20, 1, -30)
+    MsgLabel.Position = UDim2.new(0, 12, 0, 26)
+    MsgLabel.BackgroundTransparency = 1
+    MsgLabel.Text = message
+    MsgLabel.TextColor3 = Color3.fromRGB(185, 187, 190)
+    MsgLabel.Font = Enum.Font.Gotham
+    MsgLabel.TextSize = 11
+    MsgLabel.TextWrapped = true
+    MsgLabel.TextXAlignment = Enum.TextXAlignment.Left
+    MsgLabel.TextYAlignment = Enum.TextYAlignment.Top
+    MsgLabel.Parent = NotifFrame
+
+    TweenService:Create(NotifFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1, -240, 1, -80)}):Play()
+    task.delay(3.5, function()
+        if NotifFrame then
+            TweenService:Create(NotifFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(1, 30, 1, -80)}):Play()
+            task.wait(0.5)
+            NotifFrame:Destroy()
+        end
+    end)
+end
+
+-- =============================================================================
+-- TAB 1: EXECUTOR TAB
+-- =============================================================================
+local ExecutorTab = createTab("Executor")
+ExecutorTab.AddSectionHeader("Lua Execution Script Engine", 1)
+
+local InputScrollFrame = Instance.new("ScrollingFrame")
+InputScrollFrame.Size = UDim2.new(1, 0, 0, 180)
+InputScrollFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+InputScrollFrame.BorderSizePixel = 0
+InputScrollFrame.ScrollBarThickness = 4
+InputScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+InputScrollFrame.LayoutOrder = 2
+InputScrollFrame.Parent = tabs["Executor"].Container
+
+local ICCorner = Instance.new("UICorner")
+ICCorner.CornerRadius = UDim.new(0, 6)
+ICCorner.Parent = InputScrollFrame
+
+local TypeAreaBox = Instance.new("TextBox")
+TypeAreaBox.Size = UDim2.new(1, -20, 1, -20)
+TypeAreaBox.Position = UDim2.new(0, 10, 0, 10)
+TypeAreaBox.BackgroundTransparency = 1
+TypeAreaBox.Text = "print('Hello World From Bob Ultimate Executor!')"
+TypeAreaBox.TextColor3 = Color3.fromRGB(220, 221, 222)
+TypeAreaBox.ClearTextOnFocus = false
+TypeAreaBox.MultiLine = true
+TypeAreaBox.Font = Enum.Font.Code
+TypeAreaBox.TextSize = 12
+TypeAreaBox.TextXAlignment = Enum.TextXAlignment.Left
+TypeAreaBox.TextYAlignment = Enum.TextYAlignment.Top
+TypeAreaBox.Parent = InputScrollFrame
+
+TypeAreaBox:GetPropertyChangedSignal("TextBounds"):Connect(function()
+    InputScrollFrame.CanvasSize = UDim2.new(0, 0, 0, math.max(160, TypeAreaBox.TextBounds.Y + 20))
+end)
+
+ExecutorTab.AddButton("Execute Inputted Code", function()
+    local luaScriptSource = TypeAreaBox.Text
+    local success, compileError = pcall(function()
+        local executableFunc, err = loadstring(luaScriptSource)
+        if executableFunc then
+            task.spawn(executableFunc)
+        else
+            error(err or "Unknown compile sequence failure.")
+        end
+    end)
+    
+    if success then
+        ShowNotification("Executor Core", "Script executed successfully!")
+    else
+        ShowNotification("Execution Error", tostring(compileError))
+    end
+end, 3)
+
+ExecutorTab.AddButton("Clear Writing Sandbox", function()
+    TypeAreaBox.Text = ""
+    ShowNotification("Editor Core", "Cleared writing canvas!")
+end, 4)
+
+
+-- =============================================================================
+-- TAB 2: SCRIPTS TAB (WITH LOCAL DATA STORAGE & PROTECTED DEFAULTS)
+-- =============================================================================
+local ScriptsTab = createTab("Scripts")
+
+ScriptsTab.AddSectionHeader("Save a New Script", 1)
+
+local PostCreationFrame = Instance.new("Frame")
+PostCreationFrame.Size = UDim2.new(1, 0, 0, 120)
+PostCreationFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+PostCreationFrame.LayoutOrder = 2
+PostCreationFrame.Parent = tabs["Scripts"].Container
+
+local PCCorner = Instance.new("UICorner")
+PCCorner.CornerRadius = UDim.new(0, 6)
+PCCorner.Parent = PostCreationFrame
+
+local NameInputBox = Instance.new("TextBox")
+NameInputBox.Size = UDim2.new(1, -20, 0, 28)
+NameInputBox.Position = UDim2.new(0, 10, 0, 10)
+NameInputBox.BackgroundColor3 = Color3.fromRGB(32, 34, 37)
+NameInputBox.Text = ""
+NameInputBox.PlaceholderText = "Enter script title..."
+NameInputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+NameInputBox.PlaceholderColor3 = Color3.fromRGB(114, 118, 125)
+NameInputBox.Font = Enum.Font.GothamBold
+NameInputBox.TextSize = 12
+NameInputBox.Parent = PostCreationFrame
+
+local NameInputCorner = Instance.new("UICorner")
+NameInputCorner.CornerRadius = UDim.new(0, 4)
+NameInputCorner.Parent = NameInputBox
+
+local SourceInputBox = Instance.new("TextBox")
+SourceInputBox.Size = UDim2.new(1, -20, 0, 42)
+SourceInputBox.Position = UDim2.new(0, 10, 0, 44)
+SourceInputBox.BackgroundColor3 = Color3.fromRGB(32, 34, 37)
+SourceInputBox.Text = ""
+SourceInputBox.PlaceholderText = "Paste script code or loadstring here..."
+SourceInputBox.TextColor3 = Color3.fromRGB(220, 221, 222)
+SourceInputBox.PlaceholderColor3 = Color3.fromRGB(114, 118, 125)
+SourceInputBox.ClearTextOnFocus = false
+SourceInputBox.MultiLine = true
+SourceInputBox.Font = Enum.Font.Code
+SourceInputBox.TextSize = 11
+SourceInputBox.TextXAlignment = Enum.TextXAlignment.Left
+SourceInputBox.TextYAlignment = Enum.TextYAlignment.Top
+SourceInputBox.Parent = PostCreationFrame
+
+local SourceInputCorner = Instance.new("UICorner")
+SourceInputCorner.CornerRadius = UDim.new(0, 4)
+SourceInputCorner.Parent = SourceInputBox
+
+local SubmitPostBtn = Instance.new("TextButton")
+SubmitPostBtn.Size = UDim2.new(1, -20, 0, 24)
+SubmitPostBtn.Position = UDim2.new(0, 10, 0, 90)
+SubmitPostBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+SubmitPostBtn.Text = "Save To Scripts List"
+SubmitPostBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SubmitPostBtn.Font = Enum.Font.GothamBold
+SubmitPostBtn.TextSize = 12
+SubmitPostBtn.Parent = PostCreationFrame
+table.insert(registeredElements, SubmitPostBtn)
+
+local SubmitCorner = Instance.new("UICorner")
+SubmitCorner.CornerRadius = UDim.new(0, 4)
+SubmitCorner.Parent = SubmitPostBtn
+
+ScriptsTab.AddSectionHeader("Available Scripts Database", 3)
+
+local ScriptsFeedContainer = Instance.new("Frame")
+ScriptsFeedContainer.Size = UDim2.new(1, 0, 0, 0)
+ScriptsFeedContainer.BackgroundTransparency = 1
+ScriptsFeedContainer.LayoutOrder = 4
+ScriptsFeedContainer.Parent = tabs["Scripts"].Container
+
+local FeedLayout = Instance.new("UIListLayout")
+FeedLayout.Padding = UDim.new(0, 6)
+FeedLayout.SortOrder = Enum.SortOrder.LayoutOrder
+FeedLayout.Parent = ScriptsFeedContainer
+
+FeedLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScriptsFeedContainer.Size = UDim2.new(1, 0, 0, FeedLayout.AbsoluteContentSize.Y)
+end)
+
+-- Combined Feed Rendering Handler
+local function renderFeed()
+    for _, child in ipairs(ScriptsFeedContainer:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+
+    local function createRowItem(scriptData, isDeletable, indexInTable)
+        local ItemFrame = Instance.new("Frame")
+        ItemFrame.Size = UDim2.new(1, 0, 0, 44)
+        ItemFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+        ItemFrame.Parent = ScriptsFeedContainer
+
+        local IFCorner = Instance.new("UICorner")
+        IFCorner.CornerRadius = UDim.new(0, 4)
+        IFCorner.Parent = ItemFrame
+
+        local ScriptTitle = Instance.new("TextLabel")
+        ScriptTitle.Size = UDim2.new(1, -180, 1, 0)
+        ScriptTitle.Position = UDim2.new(0, 12, 0, 0)
+        ScriptTitle.BackgroundTransparency = 1
+        ScriptTitle.Font = Enum.Font.GothamBold
+        ScriptTitle.TextSize = 13
+        ScriptTitle.TextXAlignment = Enum.TextXAlignment.Left
+        ScriptTitle.Parent = ItemFrame
+
+        -- Styling differences between Community scripts and personal scripts
+        if isDeletable then
+            ScriptTitle.Text = scriptData.Name
+            ScriptTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            ScriptTitle.Text = scriptData.Name .. " [Community]"
+            ScriptTitle.TextColor3 = Color3.fromRGB(150, 200, 255) -- Distinct coloring for locked entries
+        end
+
+        -- Execute Button Configuration
+        local ExecActionBtn = Instance.new("TextButton")
+        ExecActionBtn.BackgroundColor3 = Color3.fromRGB(67, 181, 129)
+        ExecActionBtn.Text = "Execute"
+        ExecActionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ExecActionBtn.Font = Enum.Font.GothamBold
+        ExecActionBtn.TextSize = 11
+        ExecActionBtn.Parent = ItemFrame
+
+        local EACorner = Instance.new("UICorner")
+        EACorner.CornerRadius = UDim.new(0, 4)
+        EACorner.Parent = ExecActionBtn
+
+        if isDeletable then
+            -- Standard item placement with working delete button
+            ExecActionBtn.Size = UDim2.new(0, 70, 0, 26)
+            ExecActionBtn.Position = UDim2.new(1, -165, 0.5, -13)
+
+            local DeleteActionBtn = Instance.new("TextButton")
+            DeleteActionBtn.Size = UDim2.new(0, 70, 0, 26)
+            DeleteActionBtn.Position = UDim2.new(1, -85, 0.5, -13)
+            DeleteActionBtn.BackgroundColor3 = Color3.fromRGB(240, 71, 71)
+            DeleteActionBtn.Text = "Delete"
+            DeleteActionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            DeleteActionBtn.Font = Enum.Font.GothamBold
+            DeleteActionBtn.TextSize = 11
+            DeleteActionBtn.Parent = ItemFrame
+
+            local DACorner = Instance.new("UICorner")
+            DACorner.CornerRadius = UDim.new(0, 4)
+            DACorner.Parent = DeleteActionBtn
+
+            DeleteActionBtn.MouseButton1Click:Connect(function()
+                table.remove(savedScripts, indexInTable)
+                saveScriptsData()
+                renderFeed()
+                ShowNotification("Database Notice", "Deleted script profile.")
+            end)
+        else
+            -- Community item structure: spans wider and drops the delete container completely
+            ExecActionBtn.Size = UDim2.new(0, 85, 0, 26)
+            ExecActionBtn.Position = UDim2.new(1, -100, 0.5, -13)
+        end
+
+        ExecActionBtn.MouseButton1Click:Connect(function()
+            local executed, err = pcall(function()
+                local func = loadstring(scriptData.Source)
+                if func then task.spawn(func) else error(err) end
+            end)
+            if executed then
+                ShowNotification("Scripts Core", "Executed: " .. scriptData.Name)
+            else
+                ShowNotification("Run Failure", "Failed script compilation.")
+            end
+        end)
+    end
+
+    -- First render un-deletable core elements
+    for idx, data in ipairs(defaultScripts) do
+        createRowItem(data, false, idx)
+    end
+
+    -- Next render modifiable configuration profile elements
+    for idx, data in ipairs(savedScripts) do
+        createRowItem(data, true, idx)
+    end
+end
+
+SubmitPostBtn.MouseButton1Click:Connect(function()
+    local targetName = NameInputBox.Text
+    local targetSource = SourceInputBox.Text
+
+    if string.gsub(targetName, " ", "") ~= "" and string.gsub(targetSource, " ", "") ~= "" then
+        table.insert(savedScripts, 1, {Name = targetName, Source = targetSource})
+        saveScriptsData()
+        renderFeed()
+        
+        NameInputBox.Text = ""
+        SourceInputBox.Text = ""
+        ShowNotification("Success", "Script saved to local device profile cache!")
+    else
+        ShowNotification("Form Warning", "Fields cannot be processed empty.")
+    end
+end)
+
+renderFeed()
+
+
+-- =============================================================================
+-- TAB 3: SETTINGS TAB (RGB PICKER & THEMES)
+-- =============================================================================
+local SettingsTab = createTab("Settings")
+
+SettingsTab.AddSectionHeader("Custom RGB Picker")
+
+local RGBMainFrame = Instance.new("Frame")
+RGBMainFrame.Size = UDim2.new(1, 0, 0, 155)
+RGBMainFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+RGBMainFrame.Parent = tabs["Settings"].Container
+
+local RGBCorner = Instance.new("UICorner")
+RGBCorner.CornerRadius = UDim.new(0, 6)
+RGBCorner.Parent = RGBMainFrame
+
+local LivePreview = Instance.new("Frame")
+LivePreview.Name = "LiveRGBPreview"
+LivePreview.Size = UDim2.new(0, 90, 0, 90)
+LivePreview.Position = UDim2.new(0, 15, 0, 15)
+LivePreview.BackgroundColor3 = currentThemeColor
+LivePreview.Parent = RGBMainFrame
+
+local LPCorner = Instance.new("UICorner")
+LPCorner.CornerRadius = UDim.new(0, 6)
+LPCorner.Parent = LivePreview
+
+local ApplyRGBBtn = Instance.new("TextButton")
+ApplyRGBBtn.Size = UDim2.new(0, 90, 0, 30)
+ApplyRGBBtn.Position = UDim2.new(0, 15, 0, 112)
+ApplyRGBBtn.BackgroundColor3 = Color3.fromRGB(67, 181, 129)
+ApplyRGBBtn.Text = "Apply RGB"
+ApplyRGBBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ApplyRGBBtn.Font = Enum.Font.GothamBold
+ApplyRGBBtn.TextSize = 11
+ApplyRGBBtn.Parent = RGBMainFrame
+
+local RGBBtnCorner = Instance.new("UICorner")
+RGBBtnCorner.CornerRadius = UDim.new(0, 4)
+RGBBtnCorner.Parent = ApplyRGBBtn
+
+local rVal, gVal, bVal = 88, 101, 242
+
+local function updateLiveRGB()
+    LivePreview.BackgroundColor3 = Color3.fromRGB(rVal, gVal, bVal)
+end
+
+local function createRGBSlider(name, channel, positionY, defaultVal)
+    local SliderBg = Instance.new("Frame")
+    SliderBg.Size = UDim2.new(1, -140, 0, 30)
+    SliderBg.Position = UDim2.new(0, 122, 0, positionY)
+    SliderBg.BackgroundColor3 = Color3.fromRGB(32, 34, 37)
+    SliderBg.Parent = RGBMainFrame
+
+    local SBCorner = Instance.new("UICorner")
+    SBCorner.CornerRadius = UDim.new(0, 4)
+    SBCorner.Parent = SliderBg
+
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(0, 20, 1, 0)
+    Title.Position = UDim2.new(0, 10, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.Text = name
+    Title.TextColor3 = Color3.fromRGB(185, 187, 190)
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 12
+    Title.Parent = SliderBg
+
+    local Track = Instance.new("Frame")
+    Track.Size = UDim2.new(1, -75, 0, 4)
+    Track.Position = UDim2.new(0, 35, 0.5, -2)
+    Track.BackgroundColor3 = Color3.fromRGB(64, 68, 75)
+    Track.BorderSizePixel = 0
+    Track.Parent = SliderBg
+
+    local Knob = Instance.new("TextButton")
+    Knob.Size = UDim2.new(0, 12, 0, 12)
+    Knob.Position = UDim2.new(defaultVal / 255, -6, 0.5, -6)
+    Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Knob.Text = ""
+    Knob.Parent = Track
+
+    local KCorner = Instance.new("UICorner")
+    KCorner.CornerRadius = UDim.new(1, 0)
+    KCorner.Parent = Knob
+
+    local ValueLabel = Instance.new("TextLabel")
+    ValueLabel.Size = UDim2.new(0, 30, 1, 0)
+    ValueLabel.Position = UDim2.new(1, -35, 0, 0)
+    ValueLabel.BackgroundTransparency = 1
+    ValueLabel.Text = tostring(defaultVal)
+    ValueLabel.TextColor3 = Color3.fromRGB(220, 221, 222)
+    ValueLabel.Font = Enum.Font.GothamMedium
+    ValueLabel.TextSize = 11
+    ValueLabel.Parent = SliderBg
+
+    local dragging = false
+    Knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local relativeX = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
+            Knob.Position = UDim2.new(relativeX, -6, 0.5, -6)
+            local calculatedVal = math.round(relativeX * 255)
+            ValueLabel.Text = tostring(calculatedVal)
+            if channel == "R" then rVal = calculatedVal
+            elseif channel == "G" then gVal = calculatedVal
+            elseif channel == "B" then bVal = calculatedVal end
+            updateLiveRGB()
+        end
+    end)
+end
+
+createRGBSlider("R", "R", 15, rVal)
+createRGBSlider("G", "G", 50, gVal)
+createRGBSlider("B", "B", 85, bVal)
+
+ApplyRGBBtn.MouseButton1Click:Connect(function()
+    stopRainbow()
+    updateTheme(Color3.fromRGB(rVal, gVal, bVal))
+    ShowNotification("RGB Engine", "Applied custom theme setup color layouts!")
+end)
+
+SettingsTab.AddSectionHeader("Preset Themes")
+
+local function createThemeControl(themeName, color, isRainbowPreset)
+    local ThemeFrame = Instance.new("Frame")
+    ThemeFrame.Size = UDim2.new(1, 0, 0, 40)
+    ThemeFrame.BackgroundColor3 = Color3.fromRGB(47, 49, 54)
+    ThemeFrame.Parent = tabs["Settings"].Container
+
+    local TFCorner = Instance.new("UICorner")
+    TFCorner.CornerRadius = UDim.new(0, 4)
+    ThemeFrame.Parent = tabs["Settings"].Container
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(0, 150, 1, 0)
+    Label.Position = UDim2.new(0, 12, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = themeName
+    Label.TextColor3 = Color3.fromRGB(220, 221, 222)
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = ThemeFrame
+
+    local Preview = Instance.new("Frame")
+    Preview.Name = "StaticColorPreview"
+    Preview.Size = UDim2.new(0, 22, 0, 22)
+    Preview.Position = UDim2.new(1, -110, 0.5, -11)
+
+    if isRainbowPreset then
+        Preview.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        local UIGradient = Instance.new("UIGradient")
+        UIGradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+            ColorSequenceKeypoint.new(0.4, Color3.fromRGB(0, 255, 0)),
+            ColorSequenceKeypoint.new(0.8, Color3.fromRGB(0, 0, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+        })
+        UIGradient.Parent = Preview
+    else
+        Preview.BackgroundColor3 = color
+    end
+
+    Preview.Parent = ThemeFrame
+
+    local PCorner = Instance.new("UICorner")
+    PCorner.CornerRadius = UDim.new(0, 4)
+    PCorner.Parent = Preview
+
+    local ApplyBtn = Instance.new("TextButton")
+    ApplyBtn.Size = UDim2.new(0, 70, 0, 26)
+    ApplyBtn.Position = UDim2.new(1, -80, 0.5, -13)
+    ApplyBtn.BackgroundColor3 = Color3.fromRGB(67, 181, 129)
+    ApplyBtn.Text = "Apply"
+    ApplyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ApplyBtn.Font = Enum.Font.GothamBold
+    ApplyBtn.TextSize = 11
+    ApplyBtn.Parent = ThemeFrame
+
+    local ABCorner = Instance.new("UICorner")
+    ABCorner.CornerRadius = UDim.new(0, 4)
+    ABCorner.Parent = ApplyBtn
+
+    ApplyBtn.MouseButton1Click:Connect(function()
+        if isRainbowPreset then
+            startRainbow()
+            ShowNotification("Theme Config", "Dynamic Rainbow style preset active!")
+        else
+            stopRainbow()
+            updateTheme(color)
+            ShowNotification("Theme Config", "Custom theme profile adjusted successfully!")
+        end
+    end)
+end
+
+-- Preset Theme Definitions
+createThemeControl("Default Discord Blurple",   Color3.fromRGB(88,  101, 242))
+createThemeControl("Dynamic Rainbow Spectrum",  nil, true)
+createThemeControl("Vibrant Neon Purple",        Color3.fromRGB(145, 40,  230))
+createThemeControl("Vader Cyber Red",            Color3.fromRGB(240, 30,  30))
+createThemeControl("Matrix Cyber Green",         Color3.fromRGB(30,  215, 95))
+createThemeControl("Deep Electric Blue",         Color3.fromRGB(0,   150, 255))
+createThemeControl("Hot Pink Flamingo",          Color3.fromRGB(255, 20,  147))
+createThemeControl("Sunset Orange",              Color3.fromRGB(255, 100, 30))
+createThemeControl("Golden Yellow",              Color3.fromRGB(255, 200, 0))
+createThemeControl("Aqua Teal",                  Color3.fromRGB(0,   200, 180))
+createThemeControl("Coral Reef",                 Color3.fromRGB(255, 90,  90))
+createThemeControl("Midnight Navy",              Color3.fromRGB(25,  35,  100))
+createThemeControl("Sakura Pink",                Color3.fromRGB(255, 160, 190))
+createThemeControl("Toxic Lime",                 Color3.fromRGB(140, 255, 0))
+createThemeControl("Ice Cold Cyan",              Color3.fromRGB(0,   230, 255))
+createThemeControl("Magma Orange-Red",           Color3.fromRGB(220, 60,  0))
+createThemeControl("Lavender Dream",             Color3.fromRGB(180, 140, 255))
+createThemeControl("Rose Gold",                  Color3.fromRGB(220, 150, 130))
+createThemeControl("Forest Dark Green",          Color3.fromRGB(20,  130, 60))
+createThemeControl("Ocean Deep Blue",            Color3.fromRGB(10,  80,  160))
+createThemeControl("Soft Mint",                  Color3.fromRGB(100, 230, 180))
+createThemeControl("Blood Moon Red",             Color3.fromRGB(180, 0,   30))
+createThemeControl("Neon Yellow-Green",          Color3.fromRGB(200, 255, 50))
+createThemeControl("Peach Cream",                Color3.fromRGB(255, 180, 130))
+createThemeControl("Void Black Purple",          Color3.fromRGB(60,  0,   100))
+createThemeControl("Sky Blue",                   Color3.fromRGB(100, 180, 255))
+createThemeControl("Burnt Sienna",               Color3.fromRGB(180, 90,  30))
+createThemeControl("Icy Periwinkle",             Color3.fromRGB(140, 160, 240))
+createThemeControl("Chrome Silver",              Color3.fromRGB(180, 185, 195))
+createThemeControl("Deep Crimson",               Color3.fromRGB(160, 10,  50))
+createThemeControl("Neon Blue Pulse",            Color3.fromRGB(30,  80,  255))
+createThemeControl("Candy Purple",               Color3.fromRGB(200, 80,  255))
+createThemeControl("Amber Gold",                 Color3.fromRGB(255, 165, 0))
+createThemeControl("Seafoam Green",              Color3.fromRGB(70,  200, 140))
+createThemeControl("Arctic White-Blue",          Color3.fromRGB(200, 230, 255))
+createThemeControl("Mango Yellow-Orange",        Color3.fromRGB(255, 150, 50))
+createThemeControl("Shadow Grey",                Color3.fromRGB(90,  95,  105))
+createThemeControl("Plasma Pink",                Color3.fromRGB(255, 50,  180))
+createThemeControl("Ultraviolet",                Color3.fromRGB(100, 0,   200))
+createThemeControl("Inferno Core",               Color3.fromRGB(255, 70,  0))
+createThemeControl("Radioactive",                Color3.fromRGB(100, 255, 30))
+createThemeControl("Deep Sapphire",              Color3.fromRGB(15,  50,  180))
+createThemeControl("Cherry Blossom",             Color3.fromRGB(255, 130, 160))
+createThemeControl("Spearmint",                  Color3.fromRGB(60,  210, 150))
+createThemeControl("Sandstorm",                  Color3.fromRGB(210, 180, 100))
+createThemeControl("Glacier Ice",                Color3.fromRGB(160, 220, 240))
+createThemeControl("Obsidian",                   Color3.fromRGB(40,  40,  55))
+createThemeControl("Solar Flare",                Color3.fromRGB(255, 130, 0))
+createThemeControl("Nebula Blue",                Color3.fromRGB(50,  80,  200))
+createThemeControl("Toxic Waste",                Color3.fromRGB(155, 255, 0))
+createThemeControl("Lava Red",                   Color3.fromRGB(200, 20,  0))
+createThemeControl("Electric Indigo",            Color3.fromRGB(75,  0,   255))
+createThemeControl("Cotton Candy Blue",          Color3.fromRGB(130, 200, 255))
+createThemeControl("Cotton Candy Pink",          Color3.fromRGB(255, 170, 210))
+createThemeControl("Molten Gold",                Color3.fromRGB(230, 175, 20))
+createThemeControl("Ghost White",                Color3.fromRGB(220, 225, 235))
+createThemeControl("Dark Teal",                  Color3.fromRGB(0,   120, 120))
+createThemeControl("Strawberry Red",             Color3.fromRGB(230, 30,  70))
+createThemeControl("Mint Chocolate",             Color3.fromRGB(50,  160, 100))
+createThemeControl("Cyber Yellow",               Color3.fromRGB(255, 235, 0))
+createThemeControl("Steel Blue",                 Color3.fromRGB(70,  120, 175))
+createThemeControl("Grape Soda",                 Color3.fromRGB(140, 60,  200))
+createThemeControl("Tangerine",                  Color3.fromRGB(255, 120, 40))
+createThemeControl("Wisteria Purple",            Color3.fromRGB(160, 110, 210))
+createThemeControl("Jungle Green",               Color3.fromRGB(30,  160, 70))
+createThemeControl("Neon Coral",                 Color3.fromRGB(255, 80,  100))
+createThemeControl("Deep Space",                 Color3.fromRGB(15,  15,  60))
+createThemeControl("Holographic Teal",           Color3.fromRGB(0,   255, 210))
+createThemeControl("Rusty Iron",                 Color3.fromRGB(150, 70,  40))
+createThemeControl("Aurora Green",               Color3.fromRGB(50,  240, 150))
+createThemeControl("Aurora Pink",                Color3.fromRGB(220, 80,  255))
+createThemeControl("Blaze Orange",               Color3.fromRGB(255, 85,  20))
+createThemeControl("Frostbite Blue",             Color3.fromRGB(90,  180, 230))
+createThemeControl("Ruby Gem",                   Color3.fromRGB(200, 10,  60))
+createThemeControl("Emerald City",               Color3.fromRGB(10,  180, 80))
+createThemeControl("Bone White",                 Color3.fromRGB(230, 215, 190))
+createThemeControl("Dark Magenta",               Color3.fromRGB(180, 0,   130))
+createThemeControl("Copper Penny",               Color3.fromRGB(200, 120, 80))
+createThemeControl("Neon Mint",                  Color3.fromRGB(50,  255, 180))
+createThemeControl("Crimson Tide",               Color3.fromRGB(170, 15,  40))
+createThemeControl("Dusty Rose",                 Color3.fromRGB(210, 140, 145))
+createThemeControl("Blue Raspberry",             Color3.fromRGB(0,   100, 220))
+createThemeControl("Gold Rush",                  Color3.fromRGB(215, 160, 0))
+createThemeControl("Violet Storm",               Color3.fromRGB(110, 30,  180))
+createThemeControl("Pastel Green",               Color3.fromRGB(150, 230, 170))
+createThemeControl("Pastel Yellow",              Color3.fromRGB(255, 240, 150))
+createThemeControl("Pastel Lavender",            Color3.fromRGB(200, 180, 240))
