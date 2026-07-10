@@ -1,0 +1,135 @@
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "WORDS"
+ScreenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 350, 0, 450)
+MainFrame.Position = UDim2.new(0.5, -175, 0.5, -225)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Active = true
+Instance.new("UICorner", MainFrame)
+
+-- ==================== FIXED DRAGGING ====================
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+-- =======================================================
+
+local CloseBtn = Instance.new("TextButton", MainFrame)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Text = "×"
+CloseBtn.TextColor3 = Color3.new(1, 0, 0)
+CloseBtn.TextSize = 25
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+local SearchBar = Instance.new("TextBox", MainFrame)
+SearchBar.Size = UDim2.new(1, -40, 0, 40)
+SearchBar.Position = UDim2.new(0, 20, 0, 50)
+SearchBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+SearchBar.PlaceholderText = "Loading words..."
+SearchBar.TextColor3 = Color3.new(1, 1, 1)
+SearchBar.TextSize = 16
+Instance.new("UICorner", SearchBar)
+
+local Scroll = Instance.new("ScrollingFrame", MainFrame)
+Scroll.Size = UDim2.new(1, -20, 1, -110)
+Scroll.Position = UDim2.new(0, 10, 0, 100)
+Scroll.BackgroundTransparency = 1
+Scroll.ScrollBarThickness = 4
+
+local Layout = Instance.new("UIListLayout", Scroll)
+Layout.Padding = UDim.new(0, 5)
+
+local words = {}
+
+task.spawn(function()
+    local urls = {
+        "https://raw.githubusercontent.com/bob1234-gd/BOB-ULTIMATE-HUB-DO-NOT-SKID-OR-DIE/main/words.txt",
+        "https://raw.githubusercontent.com/bob1234-gd/BOB-ULTIMATE-HUB-DO-NOT-SKID-OR-DIE/main/words",
+        "https://gist.githubusercontent.com/eyturner/3d56f6a194f411af9f29df4c9d4a4e6e/raw/20k.txt"
+    }
+   
+    for _, url in ipairs(urls) do
+        local success, response = pcall(function()
+            return game:HttpGet(url, true)
+        end)
+       
+        if success and response and #response > 1000 then
+            for word in response:gmatch("[^\r\n]+") do
+                local trimmed = word:match("^%s*(.-)%s*$")
+                if #trimmed > 1 then
+                    table.insert(words, trimmed)
+                end
+            end
+            SearchBar.PlaceholderText = "Search (" .. #words .. " words loaded)"
+            print("Loaded from: " .. url)
+            return
+        end
+    end
+   
+    SearchBar.PlaceholderText = "Failed to load words"
+end)
+
+local function update()
+    for _, v in ipairs(Scroll:GetChildren()) do
+        if v:IsA("TextButton") then v:Destroy() end
+    end
+
+    local input = SearchBar.Text:lower()
+    if input == "" then return end
+
+    local count = 0
+    for _, word in ipairs(words) do
+        if word:lower():find(input, 1, true) then
+            count = count + 1
+            local b = Instance.new("TextButton", Scroll)
+            b.Size = UDim2.new(0.95, 0, 0, 35)
+            b.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+            b.Text = word
+            b.TextColor3 = Color3.new(1,1,1)
+            b.TextSize = 18
+            Instance.new("UICorner", b)
+
+            b.MouseButton1Click:Connect(function()
+                setclipboard(word)
+                b.Text = "✅ COPIED!"
+                task.wait(1)
+                b.Text = word
+            end)
+
+            if count >= 50 then break end
+        end
+    end
+    Scroll.CanvasSize = UDim2.new(0, 0, 0, Layout.AbsoluteContentSize.Y)
+end
+
+SearchBar:GetPropertyChangedSignal("Text"):Connect(update)
