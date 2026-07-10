@@ -1,0 +1,47 @@
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local Humanoid = Character:WaitForChild("Humanoid")
+
+local HEIGHT = 50 -- Change this number to adjust height
+
+local function forceChat(message)
+    if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+        local RBXGeneral = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
+        if RBXGeneral then RBXGeneral:SendAsync(message) end
+    else
+        local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvents and chatEvents:FindFirstChild("SayMessageRequest") then
+            chatEvents.SayMessageRequest:FireServer(message, "All")
+        end
+    end
+end
+
+forceChat("ＭＹＳＴＥＲＩＯＵＳ ＷＩＮＤ")
+
+HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position + Vector3.new(0, HEIGHT, 0)) * CFrame.Angles(math.pi, 0, 0)
+
+local SpinForce = Instance.new("BodyAngularVelocity")
+SpinForce.Name = "CrazySpin"
+SpinForce.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+SpinForce.AngularVelocity = Vector3.new(0, 40, 0)
+SpinForce.Parent = HumanoidRootPart
+
+local TouchConnection
+TouchConnection = Humanoid.Touched:Connect(function(hit)
+    if not hit:IsDescendantOf(Character) and hit.CanCollide then
+        
+        forceChat("［ＥＸＰＬＯＤＥ］")
+        Humanoid.Health = 0
+        
+        TouchConnection:Disconnect()
+        
+        if SpinForce and SpinForce.Parent then
+            SpinForce:Destroy()
+        end
+    end
+end)
